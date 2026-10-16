@@ -1,0 +1,239 @@
+let
+    Source = Csv.Document(File.Contents("C:\Users\Admin\Downloads\Jcars_data.csv"),
+        [Delimiter=",", Columns=32, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+    #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+    #"Changed column type" = Table.TransformColumnTypes(#"Promoted Headers",
+        List.Transform(Table.ColumnNames(#"Promoted Headers"), each {_, type text})),
+
+    FX = #table(type table [Cur = text, Rate = number],
+        {{"KES", 1}, {"USD", 129.40}, {"EUR", 136.90}, {"ZAR", 7.33}, {"GBP", 181.00}}),
+
+   
+    fnKey = (v as any) as text => Text.Select(Text.Lower(Text.From(v) ?? ""), {"a".."z", "0".."9"}),
+
+    fnCat = (v as any, m as list) as text =>
+        let
+            raw = Text.Trim(Text.Combine(List.Select(Text.Split(Text.Clean(Text.From(v) ?? ""), " "), each _ <> ""), " ")),
+            k = fnKey(raw),
+            hit = List.First(List.Select(m, each _{0} = k))
+        in
+            if hit <> null then hit{1}
+            else if List.Contains({"", "na", "null", "unknown", "tbd", "none"}, k) then "Unknown"
+            else Text.Proper(raw),
+
+    fnDate = (v as any) as nullable date =>
+        let
+            t = Text.Trim(Text.From(v) ?? ""),
+            n = try Number.From(t) otherwise null
+        in
+            if t = "" or t = "N/A" or t = "NULL" or t = "#DATE!" then null
+            else if n <> null and n > 30000 and n < 60000 then Date.From(#date(1899, 12, 30) + #duration(n, 0, 0, 0))
+            else try Date.FromText(t, "en-GB") otherwise try Date.FromText(t, "en-US") otherwise null,
+
+    // Currency-aware money parser: returns [Amt, Curr, AmtKES]
+    fnMoney = (v as any) as record =>
+        let
+            t0 = Text.Upper(Text.Trim(Text.From(v) ?? "")),
+            bad = {"","-","ERROR","#VALUE!","#ERROR","MISSING","NOT AVAILABLE","TBD","NULL","NOT SURE"},
+            isBad = List.Contains(bad, t0),
+            curr = if isBad then null
+                   else if Text.Contains(t0, "USD") or Text.Contains(t0, "$") then "USD"
+                   else if Text.Contains(t0, "EUR") then "EUR"
+                   else if Text.Contains(t0, "ZAR") or Text.StartsWith(t0, "R ") then "ZAR"
+                   else if Text.Contains(t0, "GBP") or Text.Contains(t0, "?") then "GBP"   // "?" = mojibake £
+                   else "KES",
+            isM = not isBad and Text.EndsWith(t0, "M"),
+            digits = Text.Combine(List.Transform(Text.ToList(t0),
+                each if List.Contains({"0","1","2","3","4","5","6","7","8","9",".",",","-"}, _) then _ else "")),
+            n0 = if isBad then null else try Number.From(Text.Replace(digits, ",", ""), "en-US") otherwise null,
+            n  = if n0 = null then null else if isM then n0 * 1000000 else n0,
+            rate = if curr = null then null else FX{[Cur = curr]}[Rate]
+        in
+            [Amt = n, Curr = curr, AmtKES = if n = null then null else n * rate],
+
+    fnPos = (n as nullable number) as nullable number => if n <> null and n > 0 then n else null,
+    fnNN  = (n as nullable number) as nullable number => if n <> null and n >= 0 then n else null,
+
+    fnOrder = (v as any) as nullable text =>
+        let d = Text.Select(Text.From(v) ?? "", {"0".."9"})
+        in if d = "" then null else "LCL" & d,
+
+    fnAge = (v as any) as nullable number =>
+        let
+            t = Text.Lower(Text.Trim(Text.From(v) ?? "")),
+            n = try Number.From(if t = "thirty" then "30" else t, "en-US") otherwise null
+        in
+            if n = null or n < 18 or n > 100 then null else n,
+
+    fnYear = (v as any) as nullable number =>
+        let
+            t = Text.Lower(Text.Trim(Text.From(v) ?? "")),
+            n = if t = "twenty twenty" then 2020 else try Number.From(t, "en-US") otherwise null
+        in
+            if n <> null and n >= 1990 and n <= 2026 then n else null,
+
+    fnUnits = (v as any) as nullable number =>
+        let
+            t = Text.Trim(Text.Replace(Text.Lower(Text.From(v) ?? ""), "cars", "")),
+            w = {{"one", 1}, {"two", 2}, {"three", 3}},
+            hit = List.First(List.Select(w, each _{0} = t)),
+            n = if hit <> null then hit{1} else try Number.From(t, "en-US") otherwise null
+        in
+            if n <> null and n >= 1 then n else null,
+
+    // Outliers (>50%) are RETAINED and flagged - not erased
+    fnDisc = (v as any) as nullable number =>
+        let
+            t = Text.Lower(Text.Trim(Text.From(v) ?? "")),
+            w = {{"fifteen", "15"}, {"ten percent", "10"}, {"twenty %", "20"}, {"none", "0"}, {"no discount", "0"}},
+            hit = List.First(List.Select(w, each _{0} = t)),
+            t2 = if hit <> null then hit{1} else Text.Trim(Text.Replace(Text.Replace(t, "percent", ""), "%", "")),
+            n = try Number.From(t2, "en-US") otherwise null,
+            a = if n = null then null else Number.Abs(n)
+        in
+            if a = null then null else if a >= 1 then a / 100 else a,
+
+    fnRating = (v as any) as nullable number =>
+        let
+            t = Text.Lower(Text.Trim(Text.From(v) ?? "")),
+            c = Text.Trim(Text.Replace(Text.Replace(t, "out of 5", ""), "/5", "")),
+            n = if c = "excellent" then 5 else try Number.From(c, "en-US") otherwise null
+        in
+            if n <> null and n >= 0 and n <= 5 then n else null,
+
+    fnCount = (v as any) as nullable number =>
+        let
+            t = Text.Lower(Text.Trim(Text.From(v) ?? "")),
+            n = if t = "ten" then 10 else try Number.From(t, "en-US") otherwise null
+        in
+            if n <> null and n >= 0 then n else null,
+
+    TypeMap = {{"cardealer","Dealer"},{"dealer","Dealer"},{"company","Corporate"},{"corp","Corporate"},{"corporate","Corporate"},{"countygovt","Government"},{"government","Government"},{"govt","Government"},{"individual","Retail"},{"person","Retail"},{"retail","Retail"},{"ngo","NGO"},{"nonprofit","NGO"}},
+    RegionMap = {{"cental","Central"},{"cost","Coast"},{"east","Eastern"},{"eastrn","Eastern"},{"ksmregion","Nyanza"},{"msaregion","Coast"},{"mtkenya","Central"},{"nairobii","Nairobi"},{"nbi","Nairobi"},{"nrb","Nairobi"},{"nyanzaregion","Nyanza"},{"rift","Rift Valley"},{"riftvalley","Rift Valley"},{"west","Western"},{"westen","Western"}},
+    CountyMap = {{"eldoret","Uasin Gishu"},{"kakamegacounty","Kakamega"},{"kambu","Kiambu"},{"kiambucounty","Kiambu"},{"kisumucounty","Kisumu"},{"ksm","Kisumu"},{"mchakos","Machakos"},{"mks","Machakos"},{"mombasacounty","Mombasa"},{"msa","Mombasa"},{"nairobicounty","Nairobi"},{"nairobii","Nairobi"},{"nrb","Nairobi"},{"nakurucounty","Nakuru"},{"nkr","Nakuru"},{"uasingishu","Uasin Gishu"}},
+    CityMap = {{"athiriver","Athi River"},{"eld","Eldoret"},{"kakamegatown","Kakamega"},{"ksm","Kisumu"},{"msa","Mombasa"},{"nkr","Nakuru"},{"thikka","Thika"}},
+    BranchMap = {{"athiriveryard","Athi River"},{"athiriver","Athi River"},{"eld","Eldoret"},{"eldyard","Eldoret"},{"eldoretbranch","Eldoret"},{"eldoretyard","Eldoret"},{"kakamegabranch","Kakamega"},{"kakamegayard","Kakamega"},{"kisumubranch","Kisumu"},{"kisumuyard","Kisumu"},{"ksmyard","Kisumu"},{"mainyard","Nairobi HQ"},{"nairobihq","Nairobi HQ"},{"mombasaport","Mombasa"},{"mombasaportyard","Mombasa"},{"mombasayard","Mombasa"},{"msayard","Mombasa"},{"nakurubranch","Nakuru"},{"nakuruyard","Nakuru"},{"nkryard","Nakuru"},{"thikabranch","Thika"},{"thikayard","Thika"}},
+    RepMap = {{"aisha","Aisha Mohamed"},{"brian","Brian Otieno"},{"daniel","Daniel Kimani"},{"faith","Faith Achieng"},{"grace","Grace Njeri"},{"kevin","Kevin Mwangi"},{"mary","Mary Wanjiku"},{"mercy","Mercy Atieno"},{"peter","Peter Kiptoo"},{"samuel","Samuel Mutua"}},
+    LeadMap = {{"call","Phone Call"},{"phone","Phone Call"},{"phonecall","Phone Call"},{"corptender","Corporate Tender"},{"corporate","Corporate Tender"},{"corporatetender","Corporate Tender"},{"tender","Corporate Tender"},{"fb","Facebook"},{"ig","Instagram"},{"insta","Instagram"},{"referal","Referral"},{"refferal","Referral"},{"site","Website"},{"web","Website"},{"walkin","Walk-in"},{"watsapp","WhatsApp"},{"whatsapp","WhatsApp"}, {"facebook","Facebook"}},
+    MakeMap = {{"bmw","BMW"},{"benz","Mercedes-Benz"},{"mercedes","Mercedes-Benz"},{"mercedesbenz","Mercedes-Benz"},{"hondaa","Honda"},{"hondamotors","Honda"},{"iszu","Isuzu"},{"mazada","Mazda"},{"mitshubishi","Mitsubishi"},{"mitsubish","Mitsubishi"},{"nisan","Nissan"},{"subru","Subaru"},{"totoya","Toyota"},{"toyta","Toyota"},{"toyotakenya","Toyota"},{"vw","Volkswagen"},{"volkswagen","Volkswagen"}},
+    ModelMap = {{"corola","Corolla"},{"corrola","Corolla"},{"corollaaltis","Corolla"},{"harier","Harrier"},{"fieldar","Fielder"},{"forestar","Forester"},{"hiece","Hiace"},{"hiacevan","Hiace"},{"hillux","Hilux"},{"imprezza","Impreza"},{"outback","Outback"},{"outlander","Outlander"},{"cx5","CX-5"},{"dmax","D-Max"},{"dmaxpickup","D-Max"},{"canterr","Canter"},{"cantertruck","Canter"},{"crv","CR-V"},{"x5","X5"},{"bmwx5","X5"},{"xtrail","X-Trail"},{"c200","C200"},{"e250","E250"},{"gle","GLE"},{"320i","320i"},{"fithybrid","Fit"},{"lc200","Land Cruiser"},{"landcruiser","Land Cruiser"},{"landcruiserprado","Prado TX"},{"prado","Prado TX"},{"pradotx","Prado TX"},{"subaruxv","XV"},{"xv","XV"},{"vezelhybrid","Vezel"},{"golfgti","Golf"}},
+    VTypeMap = {{"saloon","Sedan"},{"suv","SUV"}},
+    FuelMap = {{"dsl","Diesel"},{"ev","Electric"},{"gasoline","Petrol"},{"pms","Petrol"},{"hyb","Hybrid"},{"hybridpetrol","Hybrid"}},
+    TransMap = {{"at","Automatic"},{"auto","Automatic"},{"automatic","Automatic"},{"mt","Manual"},{"manual","Manual"}},
+    ColorMap = {{"bla","Black"},{"blu","Blue"},{"sil","Silver"},{"whi","White"},{"gre","Green"},{"grey","Grey"},{"green","Green"}},
+    PayMap = {{"assetfinance","Asset Finance"},{"assetfinancing","Asset Finance"},{"bank","Bank Transfer"},{"banktransfer","Bank Transfer"},{"wire","Bank Transfer"},{"rtgs","Bank Transfer"},{"bankerscheque","Cheque"},{"cheque","Cheque"},{"check","Cheque"},{"mpesa","M-Pesa"}},
+    StatusMap = {{"awaitingpayment","Pending"},{"unpaid","Pending"},{"pending","Pending"},{"cancel","Cancelled"},{"canceled","Cancelled"},{"cancelled","Cancelled"},{"complete","Paid"},{"completed","Paid"},{"paid","Paid"},{"depositpaid","Partially Paid"},{"partpaid","Partially Paid"},{"partial","Partially Paid"},{"partiallypaid","Partially Paid"},{"refund","Refunded"},{"refunded","Refunded"}},
+    DelivMap = {{"atyard","At Yard"},{"attheyard","At Yard"},{"yard","At Yard"},{"cancel","Cancelled"},{"canceled","Cancelled"},{"cancelled","Cancelled"},{"completed","Delivered"},{"done","Delivered"},{"delivered","Delivered"},{"late","Delayed"},{"delayed","Delayed"},{"intransit","In Transit"},{"ontheway","In Transit"},{"transit","In Transit"},{"held","Held"}},
+    ReturnMap = {{"yes","Yes"},{"y","Yes"},{"true","Yes"},{"returned","Yes"},{"no","No"},{"n","No"},{"false","No"},{"notreturned","No"}},
+
+    Dates = Table.TransformColumns(#"Changed column type", {{"Order Date", fnDate, type date}, {"Delivery Date", fnDate, type date}}),
+    Cleaned = Table.TransformColumns(Dates, {
+        {"Order ID", fnOrder, type text},
+        {"Customer Name", each fnCat(_, {}), type text},
+        {"Customer Type", each fnCat(_, TypeMap), type text},
+        {"Customer Age", fnAge, Int64.Type},
+        {"Region", each fnCat(_, RegionMap), type text},
+        {"County", each fnCat(_, CountyMap), type text},
+        {"City", each fnCat(_, CityMap), type text},
+        {"Branch", each fnCat(_, BranchMap), type text},
+        {"Sales Rep", each fnCat(Text.Replace(Text.From(_) ?? "", "1", "i"), RepMap), type text},
+        {"Lead Source", each fnCat(_, LeadMap), type text},
+        {"Car Make", each fnCat(_, MakeMap), type text},
+        {"Car Model", each fnCat(_, ModelMap), type text},
+        {"Vehicle Type", each fnCat(_, VTypeMap), type text},
+        {"Vehicle Year", fnYear, Int64.Type},
+        {"Fuel Type", each fnCat(_, FuelMap), type text},
+        {"Transmission", each fnCat(_, TransMap), type text},
+        {"Color", each fnCat(_, ColorMap), type text},
+        {"Units Sold", fnUnits, Int64.Type},
+        {"Discount", fnDisc, type number},
+        {"Payment Method", each fnCat(_, PayMap), type text},
+        {"Payment Status", each fnCat(_, StatusMap), type text},
+        {"Delivery Status", each fnCat(_, DelivMap), type text},
+        {"Customer Rating", fnRating, type number},
+        {"Review Count", fnCount, Int64.Type},
+        {"Returned", each fnCat(_, ReturnMap), type text}
+    }),
+
+    OrderKey = Table.AddIndexColumn(Cleaned, "Order Key", 1, 1, Int64.Type),
+
+    P1 = Table.AddColumn(OrderKey, "_p", each fnMoney([Unit Selling Price])),
+    P2 = Table.ExpandRecordColumn(P1, "_p", {"AmtKES"}, {"Unit Selling Price KES"}),
+    C1 = Table.AddColumn(P2, "_c", each fnMoney([Unit Cost])),
+    C2 = Table.ExpandRecordColumn(C1, "_c", {"AmtKES"}, {"Unit Cost KES"}),
+    F1 = Table.AddColumn(C2, "_f", each fnMoney([Delivery Fee])),
+    F2 = Table.ExpandRecordColumn(F1, "_f", {"AmtKES"}, {"Delivery Fee KES"}),
+    L1 = Table.AddColumn(F2, "_l", each fnMoney([Logistics Cost])),
+    L2 = Table.ExpandRecordColumn(L1, "_l", {"AmtKES"}, {"Logistics Cost KES"}),
+    R1 = Table.AddColumn(L2, "_r", each fnMoney([Revenue Recorded])),
+    R2 = Table.ExpandRecordColumn(R1, "_r", {"AmtKES"}, {"Revenue Recorded KES"}),
+
+    // Positivity rules. NOTE: Revenue Recorded KES deliberately NOT clipped -
+    // negative recorded values (LC1000) are evidence, kept + flagged below.
+    Positivity = Table.TransformColumns(R2, {
+        {"Unit Selling Price KES", fnPos, type number},
+        {"Unit Cost KES", fnPos, type number},
+        {"Delivery Fee KES", fnNN, type number},
+        {"Logistics Cost KES", fnNN, type number}
+    }),
+
+    PriceOrig = Table.AddColumn(Positivity, "Unit Selling Price KES (Original)", each [Unit Selling Price KES], type number),
+    PriceFlag = Table.AddColumn(PriceOrig, "Price Corrected", each
+        if [Unit Selling Price KES] <> null and [Unit Selling Price KES] > 20000000
+           and [Revenue Recorded KES] <> null and [Revenue Recorded KES] < 0
+        then "Yes" else "No", type text),
+    PriceFix = Table.AddColumn(PriceFlag, "Unit Selling Price KES Fixed", each
+        if [Price Corrected] = "Yes" then [Unit Selling Price KES] / 10 else [Unit Selling Price KES], type number),
+    PriceDrop = Table.RemoveColumns(PriceFix, {"Unit Selling Price KES"}),
+    PriceRename = Table.RenameColumns(PriceDrop, {{"Unit Selling Price KES Fixed", "Unit Selling Price KES"}}),
+
+    Flagged = Table.AddColumn(PriceRename, "Data Quality Flag", each
+        (if [Price Corrected] = "Yes" then "Price magnitude corrected (÷10); " else "") &
+        (if [Order Date] = null then "Order Date missing; " else "") &
+        (if [Delivery Date] = null then "Delivery Date missing; " else "") &
+        (if [Order Date] <> null and [Delivery Date] <> null and [Delivery Date] < [Order Date] then "Delivery before order; " else "") &
+        (if [Unit Selling Price KES] = null then "Price missing/invalid; " else "") &
+        (if [Unit Cost KES] = null then "Cost missing/invalid; " else "") &
+        (if [Discount] = null then "Discount missing/unknown; " else "") &
+        (if [Discount] <> null and [Discount] > 0.3 then "High discount (>30%); " else "") &
+        (if [Customer Rating] = null then "Rating invalid/defaulted; " else "") &
+        (if [Units Sold] = null then "Units defaulted; " else "") &
+        (if [Revenue Recorded KES] <> null and [Revenue Recorded KES] < 0 then "Negative recorded revenue; " else "") &
+        (if [Customer Age] = null then "Age defaulted; " else "") &
+        (if [Vehicle Year] = null then "Vehicle Year defaulted; " else ""),
+        type text),
+
+    Validated = Table.AddColumn(Flagged, "Revenue Variance KES", each
+        if [Revenue Recorded KES] = null or [Unit Selling Price KES] = null then null
+        else [Units Sold] * [Unit Selling Price KES] * (1 - ([Discount] ?? 0)) + ([Delivery Fee KES] ?? 0) - [Revenue Recorded KES],
+        type number),
+
+    Filled = Table.TransformColumns(Validated, {
+        {"Customer Age", each if _ = null then 35 else _, Int64.Type},
+        {"Vehicle Year", each if _ = null then 2022 else _, Int64.Type},
+        {"Units Sold", each if _ = null then 1 else _, Int64.Type},
+        {"Discount", each if _ = null then 0 else _, type number},
+        {"Customer Rating", each if _ = null then 3 else _, type number},
+        {"Review Count", each if _ = null then 0 else _, Int64.Type},
+        {"Delivery Fee KES", each if _ = null then 0 else _, type number},
+        {"Logistics Cost KES", each if _ = null then 0 else _, type number},
+        {"Revenue Recorded KES", each if _ = null then 0 else _, type number},
+        {"Unit Selling Price KES", each if _ = null then 0 else _, type number},
+        {"Unit Cost KES", each if _ = null then 0 else _, type number},
+        {"Order ID", each if _ = null then "UNKNOWN" else _, type text}
+    }),
+
+    Revenue = Table.AddColumn(Filled, "Revenue KES", each
+        [Units Sold] * [Unit Selling Price KES] * (1 - [Discount]) + [Delivery Fee KES], type number),
+    COGS = Table.AddColumn(Revenue, "COGS KES", each [Units Sold] * [Unit Cost KES], type number),
+    IsCancelled = Table.AddColumn(COGS, "IsCancelled", each
+        [Payment Status] = "Cancelled" or [Delivery Status] = "Cancelled", type logical),
+    DelivDays = Table.AddColumn(IsCancelled, "Delivery Days", each
+        if [Order Date] = null or [Delivery Date] = null then null
+        else Duration.Days([Delivery Date] - [Order Date]), Int64.Type),
+    OrderDateLabel = Table.AddColumn(DelivDays, "Order Date Label", each
+        if [Order Date] = null then "Unknown" else Date.ToText([Order Date], "dd/MM/yyyy"), type text),
+    DeliveryDateLabel = Table.AddColumn(OrderDateLabel, "Delivery Date Label", each
+        if [Delivery Date] = null then "Unknown" else Date.ToText([Delivery Date], "dd/MM/yyyy"), type text)
+in
+    DeliveryDateLabel

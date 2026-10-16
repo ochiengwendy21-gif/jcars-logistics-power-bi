@@ -1,0 +1,105 @@
+-- ============================================================
+-- CORE KPIs
+-- ============================================================
+Total Revenue (KES) := CALCULATE ( SUM ( FactSales[Revenue KES] ), FactSales[IsCancelled] = FALSE() )
+
+Total COGS (KES) := CALCULATE ( SUM ( FactSales[COGS KES] ), FactSales[IsCancelled] = FALSE() )
+
+Gross Profit (KES) := [Total Revenue (KES)] - [Total COGS (KES)]
+
+Gross Profit Margin % := DIVIDE ( [Gross Profit (KES)], [Total Revenue (KES)] )
+
+Total Orders := DISTINCTCOUNT ( FactSales[Order Key] )
+
+Total Units Sold := SUM ( FactSales[Units Sold] )
+
+Avg Order Value := DIVIDE ( [Total Revenue (KES)], [Total Orders] )
+
+% of Total Revenue := DIVIDE ( [Total Revenue (KES)], CALCULATE ( [Total Revenue (KES)], ALLSELECTED () ) )
+
+-- ============================================================
+-- CUSTOMERS & RATINGS
+-- ============================================================
+Customer Order Count := DISTINCTCOUNT ( FactSales[Customer Name] )
+
+Repeat Customer Rate :=
+VAR c = DISTINCTCOUNT ( FactSales[Customer Name] )
+VAR r = CALCULATE ( DISTINCTCOUNT ( FactSales[Customer Name] ),
+    FILTER ( VALUES ( FactSales[Customer Name] ), CALCULATE ( COUNTROWS ( FactSales ) ) > 1 ) )
+RETURN
+    DIVIDE ( r, c )
+
+Avg Customer Rating := AVERAGE ( FactSales[Customer Rating] )
+
+Avg Rating (Reported) := CALCULATE ( AVERAGE ( FactSales[Customer Rating] ), FactSales[Delivery Status] = "Delivered" )
+
+Total Reviews := SUM ( FactSales[Review Count] )
+
+-- ============================================================
+-- RETURNS & CANCELLATIONS
+-- ============================================================
+Returned Orders := CALCULATE ( [Total Orders], FactSales[Returned] = "Yes" )
+
+Return Rate := DIVIDE ( [Returned Orders], [Total Orders] )
+
+Cancelled Orders := CALCULATE ( [Total Orders], FactSales[IsCancelled] = TRUE() )
+
+Cancellation Rate := DIVIDE ( [Cancelled Orders], [Total Orders] )
+
+-- ============================================================
+-- DISCOUNTS & INVESTIGATION
+-- ============================================================
+Avg Discount % := AVERAGE ( FactSales[Discount] )
+
+High Discount Order Count := CALCULATE ( [Total Orders], FactSales[Discount] > 0.3 )
+
+Avg Revenue Variance := AVERAGE ( FactSales[Revenue Variance KES] )
+
+High Variance Order Count :=
+CALCULATE ( [Total Orders],
+    FILTER ( FactSales, ABS ( FactSales[Revenue Variance KES] ) > 1000000 ) )
+
+-- ============================================================
+-- DELIVERY & LOGISTICS
+-- ============================================================
+Avg Delivery Days := AVERAGE ( FactSales[Delivery Days] )
+
+Delayed Delivery Rate :=
+DIVIDE ( CALCULATE ( [Total Orders], FactSales[Delivery Status] = "Delayed" ), [Total Orders] )
+
+On-Time Delivery Rate :=
+DIVIDE ( CALCULATE ( [Total Orders], FactSales[Delivery Status] = "Delivered" ), [Total Orders] )
+
+Total Logistics Cost := SUM ( FactSales[Logistics Cost KES] )
+
+Total Delivery Fees := SUM ( FactSales[Delivery Fee KES] )
+
+Logistics Cost % of Revenue := DIVIDE ( [Total Logistics Cost], [Total Revenue (KES)] )
+
+-- ============================================================
+-- PAYMENTS
+-- ============================================================
+Outstanding (KES) := CALCULATE ( [Total Revenue (KES)],
+    FactSales[Payment Status] IN { "Pending", "Partially Paid" } )
+
+-- ============================================================
+-- TIME INTELLIGENCE
+-- ============================================================
+Revenue YTD := TOTALYTD ( [Total Revenue (KES)], DimDate[Date] )
+
+Revenue PY := CALCULATE ( [Total Revenue (KES)], SAMEPERIODLASTYEAR ( DimDate[Date] ) )
+
+Revenue YoY % := DIVIDE ( [Total Revenue (KES)] - [Revenue PY], [Revenue PY] )
+
+Revenue PM := CALCULATE ( [Total Revenue (KES)], PREVIOUSMONTH ( DimDate[Date] ) )
+
+Revenue MoM % := DIVIDE ( [Total Revenue (KES)] - [Revenue PM], [Revenue PM] )
+
+-- ============================================================
+-- RANKINGS
+-- ============================================================
+Sales Rep Rank by Revenue := RANKX ( ALL ( DimRep[Sales Rep] ), [Total Revenue (KES)] )
+
+Revenue Rank by Branch := RANKX ( ALL ( DimGeography[Branch] ), [Total Revenue (KES)] )
+
+Revenue Rank by Make := RANKX ( ALL ( DimVehicle[Car Make] ), [Total Revenue (KES)] )
