@@ -448,7 +448,7 @@ Make → model matrix (revenue, units, margin), revenue by vehicle type, discoun
 ### Page 3: Branch, Region and Sales Rep Performance
 Branch scorecard (revenue, units, margin, rating), revenue by region, sales rep leaderboard with ranks, lead source performance, customer-type slicer.
 
-![Branch, region and sales rep](screenshots/09_branch performance.png)
+![Branch, region and sales rep](screenshots/09_branch_performance.png)
 
 ### Page 4: Payments, Delivery and Logistics
 Logistics cost, logistics % of revenue, average delivery days and delay rate; payment status by value and by order count; payment method; delivery status; branch table of delivery days, delay rate and cancellation rate.
