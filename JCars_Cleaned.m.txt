@@ -1,5 +1,5 @@
 let
-    Source = Csv.Document(File.Contents("C:\Users\Admin\Downloads\Jcars_data.csv"),
+    Source = Csv.Document(File.Contents(),
         [Delimiter=",", Columns=32, Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
     #"Promoted Headers" = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
     #"Changed column type" = Table.TransformColumnTypes(#"Promoted Headers",
