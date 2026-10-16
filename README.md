@@ -443,22 +443,22 @@ Deliberately left off: payment, logistics and customer-experience detail. That b
 ### Page 2: Sales and Vehicle Performance
 Make → model matrix (revenue, units, margin), revenue by vehicle type, discount vs revenue scatter (one dot per order), vehicle-year slicer.
 
-![Sales and vehicle performance](screenshots/08_sales_vehicle_performance.png)
+![Sales and vehicle performance](screenshots/07_sales_and_profitability.png)
 
 ### Page 3: Branch, Region and Sales Rep Performance
 Branch scorecard (revenue, units, margin, rating), revenue by region, sales rep leaderboard with ranks, lead source performance, customer-type slicer.
 
-![Branch, region and sales rep](screenshots/09_branch_region_reps.png)
+![Branch, region and sales rep](screenshots/09_branch performance.png)
 
 ### Page 4: Payments, Delivery and Logistics
 Logistics cost, logistics % of revenue, average delivery days and delay rate; payment status by value and by order count; payment method; delivery status; branch table of delivery days, delay rate and cancellation rate.
 
-![Payments, delivery and logistics](screenshots/10_payments_delivery_logistics.png)
+![Payments, delivery and logistics](screenshots/10_payments.png)
 
 ### Page 5: Customers, Returns and Investigation
 Exception count, return rate, cancellation rate and reported rating; top 10 customers (Unknown excluded); returns and cancellations by make; rating vs revenue scatter; revenue by customer type; repeat vs one-time revenue.
 
-![Customers, returns and investigation](screenshots/11_customers_returns_investigation.png)
+![Customers, returns and investigation](screenshots/11_customers.png)
 
 ### Page 6: Exceptions Table
 Order-level list of flagged orders with the reason for each flag.
@@ -596,8 +596,3 @@ These recommendations describe what to investigate, change or monitor. They are 
 3. If prompted, update the data source path to `data/Jcars_data.csv` (**Transform data → Data source settings**).
 4. Refresh.
 
-No credentials or personal data are stored in this repository.
-
----
-
-*Questions or feedback are welcome. Connect with me on [LinkedIn](#) or read the [Dev.to article](#).*
