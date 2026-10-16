@@ -8,9 +8,6 @@ An end-to-end Power BI project for JCars Logistics, a Kenyan vehicle importer an
 |---|---|---|---|---|
 | 276 | 466 | 1.42bn | 12.3% | 8 (6 visible, 1 drill-through, 1 tooltip) |
 
-> Built for the LuxDevHQ Data Science programme assessment.
-> **Author:** [Your Full Name] · **Dev.to article:** [link to your article] · **Submitted:** [date]
-
 ---
 
 ## Table of Contents
